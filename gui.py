@@ -1,29 +1,20 @@
 import flet as ft
+import pandas as pd
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # GUIを使わないバックエンドを設定
+import matplotlib.pyplot as plt
+import base64
+import io
 import json
 import os
 import datetime
-import numpy as np
-import base64
-import io
-from PIL import Image, ImageDraw, ImageFont
 import glob
 import traceback
 
 # シミュレーション実行関数
 def simu(params):
-    """
-    シミュレーションを実行し、結果を保存する
-    
-    Parameters:
-    -----------
-    params : dict
-        シミュレーションパラメータ
-    
-    Returns:
-    --------
-    result : dict
-        シミュレーション結果
-    """
+    """シミュレーションを実行し、結果を保存する"""
     # 結果を保存するディレクトリを作成
     date_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     data_dir = os.path.join("..", "data", date_str)
@@ -37,105 +28,68 @@ def simu(params):
     with open(os.path.join(input_dir, "input.json"), "w") as f:
         json.dump(params, f, indent=4)
     
-    # テスト用の出力データを生成
-    beam_energy = float(params.get("beam_energy", 50))
-    beam_current = float(params.get("beam_current", 10))
-    beam_size = float(params.get("beam_size", 20))
-    resist_thickness = float(params.get("resist_thickness", 300))
-    pattern_width = float(params.get("pattern_width", 100))
-    
-    # テスト用のシミュレーション結果データ
-    sim_result = {
-        "exposure_time": beam_current * resist_thickness / (beam_energy * 1000),  # 単位: ms
-        "development_depth": resist_thickness * 0.9,  # 単位: nm
-        "pattern_width_actual": pattern_width * (1 + 0.05 * (beam_size / 20 - 1)),  # 単位: nm
-        "beam_spot_profile": [beam_size * 0.5, beam_size, beam_size * 1.5]  # 単位: nm
-    }
-    
-    # シミュレーション結果をJSONとして保存
-    with open(os.path.join(output_dir, "output.json"), "w") as f:
-        json.dump(sim_result, f, indent=4)
-    
-    # テスト用のCSVデータを生成（CDマップのプレビュー）
-    cd_preview = []
-    for i in range(5):
-        row = []
-        for j in range(5):
-            dist = np.sqrt((i-2)**2 + (j-2)**2)
-            cd_value = pattern_width * (1 - 0.1 * dist / 2.83) + np.random.normal(0, 3)
-            row.append(cd_value)
-        cd_preview.append(row)
-    
-    # CSVとして保存
-    with open(os.path.join(output_dir, "cd_preview.csv"), "w") as f:
-        for row in cd_preview:
-            f.write(",".join([f"{val:.2f}" for val in row]) + "\n")
-    
-    # 最終結果
+    # 結果を返す
     result = {
         "date_dir": date_str,
-        "params": params,
-        "sim_result": sim_result
+        "params": params
     }
     
     return result
 
 # 解析実行関数
 def Analyze(date_dir, params, ROI, X0, Y0, X_pitch, Y_pitch, X_num, Y_num):
-    """
-    解析を実行し、CD_map, pos_map, LER_mapを返す
-    
-    Returns:
-    --------
-    CD_map : np.ndarray
-        臨界寸法マップ (20, 20)
-    pos_map : np.ndarray
-        位置ずれマップ (20, 20)
-    LER_map : np.ndarray
-        Line Edge Roughnessマップ (20, 20)
-    """
+    """解析を実行し、マップを返す"""
     print(f"解析パラメータ: ROI={ROI}, X0={X0}, Y0={Y0}, X_pitch={X_pitch}, Y_pitch={Y_pitch}, X_num={X_num}, Y_num={Y_num}")
     
-    # 常に20x20の配列を生成
-    fixed_size = 20
-    
-    # テスト用データ生成
-    # CDマップ - パターン幅をベースに変動を追加
-    base_cd = float(params.get("pattern_width", 100))
-    CD_map = np.zeros((fixed_size, fixed_size))
-    
-    # 位置ずれマップ
-    pos_map = np.zeros((fixed_size, fixed_size))
-    
-    # LERマップ
-    beam_size = float(params.get("beam_size", 20))
-    LER_map = np.zeros((fixed_size, fixed_size))
-    
-    # データ生成
-    for i in range(fixed_size):
-        for j in range(fixed_size):
+    # CD_map.csvの読み込み
+    try:
+        # CSVファイルが存在するかチェック
+        csv_path = "CD_map.csv"
+        if not os.path.exists(csv_path):
+            # ファイルが見つからない場合はテストデータを生成
+            print(f"警告: {csv_path} が見つかりません。テストデータを生成します。")
+            # テスト用のデータ生成
+            fixed_size = 20
             # CDマップ
-            dist_from_center = np.sqrt(((i - fixed_size/2)/(fixed_size/2))**2 + ((j - fixed_size/2)/(fixed_size/2))**2)
-            cd_value = base_cd * (1 - 0.2 * dist_from_center) + np.random.normal(0, base_cd * 0.03)
-            wave_pattern = 5.0 * np.sin(i/2) * np.cos(j/2)
-            CD_map[i, j] = cd_value + wave_pattern
+            base_cd = float(params.get("pattern_width", 100))
+            CD_map = np.zeros((fixed_size, fixed_size))
+            for i in range(fixed_size):
+                for j in range(fixed_size):
+                    dist_from_center = np.sqrt(((i - fixed_size/2)/(fixed_size/2))**2 + ((j - fixed_size/2)/(fixed_size/2))**2)
+                    cd_value = base_cd * (1 - 0.2 * dist_from_center) + np.random.normal(0, base_cd * 0.03)
+                    wave_pattern = 5.0 * np.sin(i/2) * np.cos(j/2)
+                    CD_map[i, j] = cd_value + wave_pattern
             
-            # 位置ずれマップ
-            x_dist = (i - fixed_size/2)/(fixed_size/2)
-            y_dist = (j - fixed_size/2)/(fixed_size/2)
-            pos_map[i, j] = 5.0 * np.sqrt(x_dist**2 + y_dist**2) + np.random.normal(0, 1.0)
-            # 対角線パターン
-            if (i + j) % 5 < 2:
-                pos_map[i, j] += 2.0
-            else:
-                pos_map[i, j] -= 1.0
+            # 位置ずれマップとLERマップもテストデータで生成
+            pos_map = np.random.normal(0, 5, (fixed_size, fixed_size))
+            LER_map = np.random.normal(3, 0.5, (fixed_size, fixed_size))
+        else:
+            # CSVファイルの読み込み
+            print(f"CSVファイルを読み込み中: {csv_path}")
+            df = pd.read_csv(csv_path, index_col=0)
+            print(f"読み込み完了: {df.shape}")
             
-            # LERマップ
-            gradient = j / fixed_size
-            ler_value = (10.0 / beam_size) * (1 + 0.5 * gradient) + np.random.normal(0, 0.3)
-            LER_map[i, j] = max(0.5, ler_value)
+            # データフレームからnumpy配列に変換（X軸は降順なので注意）
+            CD_map = df.values
+            
+            # テスト用の他のマップも生成
+            fixed_size = CD_map.shape[0]
+            pos_map = np.random.normal(0, 5, CD_map.shape)
+            LER_map = np.random.normal(3, 0.5, CD_map.shape)
+            
+            # データの詳細を出力
+            print(f"データの範囲: min={np.min(CD_map)}, max={np.max(CD_map)}")
+            print(f"データのサイズ: {CD_map.shape}")
+            
+    except Exception as e:
+        print(f"CSVファイル読み込みエラー: {str(e)}")
+        traceback.print_exc()
+        # エラー時もテストデータを返す
+        fixed_size = 20
+        CD_map = np.random.normal(100, 10, (fixed_size, fixed_size))
+        pos_map = np.random.normal(0, 5, (fixed_size, fixed_size))
+        LER_map = np.random.normal(3, 0.5, (fixed_size, fixed_size))
     
-    print(f"マップサイズ: CD_map={CD_map.shape}, pos_map={pos_map.shape}, LER_map={LER_map.shape}")
     return CD_map, pos_map, LER_map
 
 class PhotomaskApp:
@@ -265,7 +219,7 @@ class PhotomaskApp:
             self.page.splash = ft.ProgressBar()
             self.page.update()
             
-            # シミュレーション実行（非同期にするべきだが、簡略化のため同期実行）
+            # シミュレーション実行
             self.simulation_result = simu(params)
             
             # 解析画面に移動
@@ -273,8 +227,7 @@ class PhotomaskApp:
             self.show_analysis_view()
         except Exception as ex:
             print(f"シミュレーション実行エラー: {str(ex)}")
-            error_details = traceback.format_exc()
-            print(error_details)
+            traceback.print_exc()
             
             self.page.dialog = ft.AlertDialog(
                 title=ft.Text("エラー"),
@@ -310,7 +263,7 @@ class PhotomaskApp:
                                 with open(input_json_path, "r") as f:
                                     params = json.load(f)
                                     
-                                # パラメータが一致するか確認（簡易比較、実際には必要に応じて条件を調整）
+                                # パラメータが一致するか確認
                                 match = True
                                 for key, value in current_params.items():
                                     if key in params and str(params[key]) != str(value):
@@ -330,8 +283,7 @@ class PhotomaskApp:
             self.show_search_results_view()
         except Exception as ex:
             print(f"検索エラー: {str(ex)}")
-            error_details = traceback.format_exc()
-            print(error_details)
+            traceback.print_exc()
             
             self.page.dialog = ft.AlertDialog(
                 title=ft.Text("エラー"),
@@ -600,7 +552,7 @@ class PhotomaskApp:
             except ValueError as ve:
                 raise ValueError(f"パラメータエラー: {str(ve)}")
             
-            # 常に20x20のマップを生成
+            # 解析実行
             CD_map, pos_map, LER_map = Analyze(
                 self.simulation_result["date_dir"],
                 self.simulation_result["params"],
@@ -609,8 +561,8 @@ class PhotomaskApp:
                 float(analysis_params["Y0"]),
                 float(analysis_params["X_pitch"]),
                 float(analysis_params["Y_pitch"]),
-                x_num,  # 実際には内部で20に上書きされる
-                y_num   # 実際には内部で20に上書きされる
+                x_num,
+                y_num
             )
             
             # マップを表示
@@ -622,8 +574,7 @@ class PhotomaskApp:
             
         except Exception as ex:
             print(f"解析エラー: {str(ex)}")
-            error_details = traceback.format_exc()
-            print(error_details)
+            traceback.print_exc()
             
             self.status_text.value = f"解析中にエラーが発生しました: {str(ex)}"
             self.status_text.color = ft.colors.RED
@@ -647,7 +598,7 @@ class PhotomaskApp:
             
             # CD Map
             print("CDマップの画像生成開始")
-            cd_map_img = self.create_simple_heatmap(CD_map, "CD Map [nm]", "viridis")
+            cd_map_img = self.create_matplotlib_heatmap(CD_map, "CD Map [nm]", "viridis")
             if cd_map_img:
                 print("CDマップの画像をコンテナに設定")
                 self.cd_map_container.content = ft.Image(src_base64=cd_map_img)
@@ -656,7 +607,7 @@ class PhotomaskApp:
             
             # Position Map
             print("位置マップの画像生成開始")
-            pos_map_img = self.create_simple_heatmap(pos_map, "Position Map [nm]", "coolwarm", center_zero=True)
+            pos_map_img = self.create_matplotlib_heatmap(pos_map, "Position Map [nm]", "coolwarm", center_zero=True)
             if pos_map_img:
                 print("位置マップの画像をコンテナに設定")
                 self.pos_map_container.content = ft.Image(src_base64=pos_map_img)
@@ -665,7 +616,7 @@ class PhotomaskApp:
             
             # LER Map
             print("LERマップの画像生成開始")
-            ler_map_img = self.create_simple_heatmap(LER_map, "LER Map [nm]", "hot")
+            ler_map_img = self.create_matplotlib_heatmap(LER_map, "LER Map [nm]", "hot")
             if ler_map_img:
                 print("LERマップの画像をコンテナに設定")
                 self.ler_map_container.content = ft.Image(src_base64=ler_map_img)
@@ -682,18 +633,14 @@ class PhotomaskApp:
             self.status_text.value = f"マップの表示中にエラーが発生しました: {str(e)}"
             self.status_text.color = ft.colors.RED
     
-    def create_simple_heatmap(self, data, title, cmap_name, center_zero=False):
-        """シンプルなヒートマップ生成関数"""
+    def create_matplotlib_heatmap(self, data, title, cmap_name, center_zero=False):
+        """matplotlibを使用してヒートマップを生成する"""
         try:
-            # PILを使用してヒートマップを作成
-            width, height = data.shape
-            size_multiplier = 15  # 各セルのピクセルサイズ
-            img_width = width * size_multiplier
-            img_height = height * size_multiplier
+            # Clear previous plot
+            plt.clf()
+            plt.figure(figsize=(10, 8))
             
-            print(f"画像サイズ: {img_width}x{img_height}, データ形状: {data.shape}")
-            
-            # 値の正規化
+            # 値の範囲を設定
             if center_zero:
                 vmax = max(abs(np.min(data)), abs(np.max(data)))
                 vmin = -vmax
@@ -701,140 +648,57 @@ class PhotomaskApp:
                 vmin = np.min(data)
                 vmax = np.max(data)
             
-            print(f"データ範囲: min={vmin}, max={vmax}")
+            # ヒートマップを作成
+            # X軸が降順の場合は、データを反転させる（origin='upper'でY軸も上が原点に）
+            im = plt.imshow(data, cmap=cmap_name, interpolation='nearest', 
+                           vmin=vmin, vmax=vmax, origin='upper')
             
-            # カラーマップの定義
-            if cmap_name == "viridis":
-                colormap = [
-                    (68, 1, 84),    # 暗い紫
-                    (59, 82, 139),  # 青紫
-                    (33, 145, 140), # ターコイズ
-                    (94, 201, 98),  # 緑
-                    (253, 231, 37)  # 黄色
-                ]
-            elif cmap_name == "coolwarm":
-                colormap = [
-                    (59, 76, 192),   # 暗い青
-                    (124, 159, 249), # 明るい青
-                    (247, 247, 247), # 白
-                    (245, 117, 88),  # 明るい赤
-                    (180, 4, 38)     # 暗い赤
-                ]
-            else:  # hot
-                colormap = [
-                    (0, 0, 0),       # 黒
-                    (136, 0, 0),     # 暗い赤
-                    (255, 0, 0),     # 赤
-                    (255, 128, 0),   # オレンジ
-                    (255, 255, 0),   # 黄色
-                    (255, 255, 255)  # 白
-                ]
+            # カラーバーを追加
+            cbar = plt.colorbar(im)
+            cbar.set_label(title)
             
-            # 画像作成
-            img = Image.new('RGB', (img_width, img_height), color='white')
-            pixels = img.load()
+            # タイトルと軸ラベルを設定
+            plt.title(title)
+            plt.xlabel("X Index")
+            plt.ylabel("Y Index")
             
-            print("画像を作成しました")
+            # グリッド線を追加
+            plt.grid(False)
             
-            # 各セルごとに色を設定
-            for i in range(width):
-                for j in range(height):
-                    value = data[i, j]
-                    # 正規化
-                    norm_value = (value - vmin) / (vmax - vmin) if vmax > vmin else 0.5
-                    norm_value = max(0, min(1, norm_value))  # 0～1の範囲に収める
-                    
-                    # カラーマップから色を取得
-                    color = self.get_color_from_map(norm_value, colormap)
-                    
-                    # サイズに応じて拡大（各セルを複数ピクセルで表現）
-                    for x in range(size_multiplier):
-                        for y in range(size_multiplier):
-                            # 座標計算
-                            px = i * size_multiplier + x
-                            py = j * size_multiplier + y
-                            # 境界チェック
-                            if 0 <= px < img_width and 0 <= py < img_height:
-                                pixels[px, py] = color
-            
-            print("ピクセルを設定しました")
-            
-            # タイトルを追加
-            title_height = 40
-            img_with_title = Image.new('RGB', (img_width, img_height + title_height), color='white')
-            img_with_title.paste(img, (0, title_height))
-            draw = ImageDraw.Draw(img_with_title)
-            
-            # 利用可能なフォントを使用
-            try:
-                font = ImageFont.truetype("arial.ttf", 16)
-            except:
-                font = ImageFont.load_default()
-            
-            # タイトルとデータの統計情報を追加
+            # 統計情報を表示
             mean_val = np.mean(data)
             std_val = np.std(data)
-            title_text = f"{title} (平均: {mean_val:.2f}, 標準偏差: {std_val:.2f})"
-            draw.text((10, 10), title_text, fill=(0, 0, 0), font=font)
+            min_val = np.min(data)
+            max_val = np.max(data)
             
-            # グリッド線を追加（オプション）
-            self.add_grid_lines(img_with_title, width, height, size_multiplier, title_height)
+            stats_text = f"Mean: {mean_val:.2f}, Std: {std_val:.2f}\nMin: {min_val:.2f}, Max: {max_val:.2f}"
+            plt.figtext(0.02, 0.02, stats_text, fontsize=9, bbox=dict(facecolor='white', alpha=0.8))
             
-            print("タイトルを追加しました")
+            # 5ごとに目盛りを表示
+            plt.xticks(np.arange(0, data.shape[1], 5))
+            plt.yticks(np.arange(0, data.shape[0], 5))
             
-            # 画像をBase64エンコード
-            buffered = io.BytesIO()
-            img_with_title.save(buffered, format="PNG")
-            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            # グリッド線の表示（メジャーグリッドのみ）
+            ax = plt.gca()
+            ax.grid(True, color='white', linestyle='-', linewidth=0.7)
+            ax.set_axisbelow(False)  # グリッドを前面に
             
-            print("Base64エンコードしました")
+            # 画像をメモリに保存してBase64でエンコード
+            buf = io.BytesIO()
+            plt.tight_layout()
+            plt.savefig(buf, format='png', dpi=100)
+            buf.seek(0)
+            plt.close()
+            
+            # Base64エンコード
+            img_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
             
             return img_base64
             
         except Exception as e:
             error_details = traceback.format_exc()
-            print(f"ヒートマップ生成エラー:\n{error_details}")
+            print(f"Matplotlibヒートマップ生成エラー:\n{error_details}")
             return None
-    
-    def add_grid_lines(self, img, width, height, size_multiplier, offset_y):
-        """ヒートマップにグリッド線を追加"""
-        try:
-            draw = ImageDraw.Draw(img)
-            
-            # 5間隔で太いグリッド線、それ以外は細い線
-            for i in range(width + 1):
-                line_color = (100, 100, 100) if i % 5 == 0 else (200, 200, 200)
-                line_width = 2 if i % 5 == 0 else 1
-                x = i * size_multiplier
-                draw.line([(x, offset_y), (x, offset_y + height * size_multiplier)], fill=line_color, width=line_width)
-            
-            for j in range(height + 1):
-                line_color = (100, 100, 100) if j % 5 == 0 else (200, 200, 200)
-                line_width = 2 if j % 5 == 0 else 1
-                y = j * size_multiplier + offset_y
-                draw.line([(0, y), (width * size_multiplier, y)], fill=line_color, width=line_width)
-        except Exception as e:
-            print(f"グリッド線追加エラー: {str(e)}")
-    
-    def get_color_from_map(self, value, colormap):
-        """0～1の値からカラーマップの色を取得"""
-        if value <= 0:
-            return colormap[0]
-        if value >= 1:
-            return colormap[-1]
-        
-        # 位置を計算
-        position = value * (len(colormap) - 1)
-        idx1 = int(position)
-        idx2 = min(idx1 + 1, len(colormap) - 1)
-        frac = position - idx1
-        
-        # 色の線形補間
-        r = int(colormap[idx1][0] * (1 - frac) + colormap[idx2][0] * frac)
-        g = int(colormap[idx1][1] * (1 - frac) + colormap[idx2][1] * frac)
-        b = int(colormap[idx1][2] * (1 - frac) + colormap[idx2][2] * frac)
-        
-        return (r, g, b)
 
 if __name__ == "__main__":
     app = PhotomaskApp()
